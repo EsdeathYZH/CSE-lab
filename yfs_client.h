@@ -55,6 +55,11 @@ class yfs_client {
   int mkdir(inum , const char *, mode_t , inum &);
   
   /** you may need to add symbolic link related methods here.*/
+  bool issymlink(inum);
+  //int readlink(const char *, char *, size_t);
+  int readlink(inum,std::string &);
+  //int symlink(const char *, const char *);
+  int symlink(inum, const char * ,const char *, inum&);
 };
 
 #endif 
