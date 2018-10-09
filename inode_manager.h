@@ -93,4 +93,3 @@ class inode_manager {
 };
 
 #endif
-

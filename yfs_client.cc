@@ -12,7 +12,7 @@
 
 yfs_client::yfs_client(std::string extent_dst, std::string lock_dst)
 {
-  ec = new extent_client(extent_dst);
+  ec = new extent_client(extent_dst); //TODO : shall we lock root directory here?
   lc = new lock_client(lock_dst);
   if (ec->put(1, "") != extent_protocol::OK)
       printf("error init root dir\n"); // XYB: init root dir
@@ -37,7 +37,7 @@ yfs_client::filename(inum inum)
 }
 
 bool
-yfs_client::isfile(inum inum)
+yfs_client::_isfile(inum inum)
 {
     extent_protocol::attr a;
 
@@ -53,6 +53,16 @@ yfs_client::isfile(inum inum)
     printf("\tisfile: %lld isn't a file\n", inum);
     return false;
 }
+
+bool
+yfs_client::isfile(inum inum)
+{
+    lc->acquire(inum);
+    bool result = _isfile(inum);
+    lc->release(inum);
+    return result;
+}
+
 /** Your code here for Lab...
  * You may need to add routines such as
  * readlink, issymlink here to implement symbolic link.
@@ -61,6 +71,14 @@ yfs_client::isfile(inum inum)
 
 bool 
 yfs_client::issymlink(inum inum){
+    lc->acquire(inum);
+    bool result = _issymlink(inum);
+    lc->release(inum);
+    return result;
+}
+
+bool 
+yfs_client::_issymlink(inum inum){
     extent_protocol::attr a;
 
     if (ec->getattr(inum, a) != extent_protocol::OK) {
@@ -77,57 +95,28 @@ yfs_client::issymlink(inum inum){
 }
 
 bool
-yfs_client::isdir(inum inum)
+yfs_client::_isdir(inum inum)
 {
-    // Oops! is this still correct when you implement symlink?
-    return !(isfile(inum)||issymlink(inum));
+    return !(_isfile(inum)||_issymlink(inum));
 }
 
-// int 
-// yfs_client::readlink(const char *path, char *buf, size_t size)
-// {
-//     int r = OK;
-//     //Parse path
-//     std::string path_str(path);
-//     int delimiter_pos = path_str.find('/');
-//     //Initial parent inum = 1(root dir)
-//     inum parent = 1,target;
-//     if(delimiter_pos != 0){
-//         printf("Lack of root symbol!\n");
-//         return IOERR;
-//     } 
-//     path_str = path_str.substr(1);
-//     delimiter_pos = path_str.find('/');
-//     bool found = false;
-//     while(delimiter_pos != std::string::npos){
-//         std::string dir = path_str.substr(0,delimiter_pos);
-//         r= lookup(parent,dir.c_str(),found,parent);
-//         if(r != OK || !found){
-//             printf("Path doesn't exist!\n");
-//             r = IOERR;
-//             return r;
-//         }
-//         path_str = path_str.substr(delimiter_pos+1);
-//         delimiter_pos = path_str.find('/');
-//     }
-//     r= lookup(parent,path_str.c_str(),found,target);
-//     if(r != OK || !found){
-//         r = IOERR;
-//         return r;
-//     }
-//     std::string target_path;
-//     r = read(target,size,0,target_path);
-//     if(r != OK) return r;
-//     strncpy(buf,target_path.c_str(),size);
-//     return r;
-// }
 
+bool
+yfs_client::isdir(inum inum)
+{
+    lc->acquire(inum);
+    bool result = _isdir(inum);
+    lc->release(inum);
+    return result;
+}
 
 int 
 yfs_client::readlink(inum inum, std::string& buf)
 {
+    lc->acquire(inum);
     int r = OK;
     r = ec->get(inum,buf);
+    lc->release(inum);
     return r;
 }
 
@@ -141,81 +130,34 @@ yfs_client::symlink(inum parent, const char *link, const char *name, inum& ino_o
         r = NOENT; // TODO:I don't know the meaning of NOENT....
         return r;
     }
-    r = lookup(parent,name,if_exist,ino_out);
+    //acquire
+    lc->acquire(parent);
+    r = _lookup(parent,name,if_exist,ino_out);
     if(if_exist){
+        lc->release(parent);
         r = EXIST;
         return r;
     }
-    if(r != OK) return r;
     r = ec->create(extent_protocol::T_SYMLINK,ino_out);
-    if(r != OK) return r;
     //FIX ME:check if the content of link is legal
     r = ec->put(ino_out,std::string(link));
-    if(r != OK) return r;
     std::string origin_data;
     ec->get(parent,origin_data);
     std::ostringstream ost;
     //FIX ME:check if the content of name is legal
     ost << origin_data << std::string(name) << ":" << ino_out << ";";
     r = ec->put(parent,ost.str());
+    //release
+    lc->release(parent);
     return r;
 }
-
-// int 
-// yfs_client::symlink(const char *linkname, const char *path)
-// {
-//     int r = OK;
-//     std::string link_path(linkname);
-//     int delimiter_pos = link_path.find('/');
-//     //Initial parent inum = 1(root dir)
-//     inum parent = 1,target;
-//     if(delimiter_pos != 0){
-//         printf("Lack of root symbol!");
-//         return IOERR;
-//     } 
-//     link_path = link_path.substr(1);
-//     delimiter_pos = link_path.find('/');
-//     bool found = false;
-//     while(delimiter_pos != std::string::npos){
-//         std::string dir = link_path.substr(0,delimiter_pos);
-//         r= lookup(parent,dir.c_str(),found,parent);
-//         if(r != OK || !found){
-//             printf("Path doesn't exist!\n");
-//             r = IOERR;
-//             return r;
-//         }
-//         link_path = link_path.substr(delimiter_pos+1);
-//         delimiter_pos = link_path.find('/');
-//     }
-//     inum link_id;
-//     //Create symbol link file
-//     bool if_exist = false;
-//     r = lookup(parent,link_path.c_str(),if_exist,link_id);
-//     if(if_exist){
-//         r = EXIST;
-//         return r;
-//     }
-//     if(r != OK) return r;
-//     ec->create(extent_protocol::T_SYMLINK,link_id);
-//     if(r != OK) return r;
-//     //Write symbol link file
-//     ec->put(link_id,std::string(path));
-//     if(r != OK) return r;
-//     std::string origin_data;
-//     //Mofify parent directory
-//     ec->get(parent,origin_data);
-//     std::ostringstream ost;
-//     ost << origin_data << link_path << ":" << link_id << ";";
-//     ec->put(parent,ost.str());
-//     return r;
-// }
-
 
 int
 yfs_client::getfile(inum inum, fileinfo &fin)
 {
     int r = OK;
-
+    //lock
+    lc->acquire(inum);
     printf("getfile %016llx\n", inum);
     extent_protocol::attr a;
     if (ec->getattr(inum, a) != extent_protocol::OK) {
@@ -230,6 +172,8 @@ yfs_client::getfile(inum inum, fileinfo &fin)
     printf("getfile %016llx -> sz %llu\n", inum, fin.size);
 
 release:
+    //release 
+    lc->release(inum);
     return r;
 }
 
@@ -238,6 +182,8 @@ yfs_client::getdir(inum inum, dirinfo &din)
 {
     int r = OK;
 
+    //lock
+    lc->acquire(inum);
     printf("getdir %016llx\n", inum);
     extent_protocol::attr a;
     if (ec->getattr(inum, a) != extent_protocol::OK) {
@@ -249,6 +195,8 @@ yfs_client::getdir(inum inum, dirinfo &din)
     din.ctime = a.ctime;
 
 release:
+    //release
+    lc->release(inum);
     return r;
 }
 
@@ -273,15 +221,22 @@ yfs_client::setattr(inum ino, size_t size)
      * according to the size (<, =, or >) content length.
      */
     std::string data;
+    //lock
+    lc->acquire(ino);
     printf("\tyfs_client-setattr:%d\n",size);
     r = ec->get(ino,data);
-    if(r != OK) return r;
+    if(r != OK){
+        lc->release(ino);
+        return r;
+    }
     if(data.size() >= size){
         data = data.substr(0,size);
     }else{
         data += std::string(size-data.size(),'\0');
     }
     ec->put(ino,data);
+    //release
+    lc->release(ino);
     return r;
 }
 
@@ -301,19 +256,29 @@ yfs_client::create(inum parent, const char *name, mode_t mode, inum &ino_out)
         r = NOENT; // TODO:I don't know the meaning of NOENT....
         return r;
     }
+    //lock
+    lc->acquire(parent);
     bool if_exist = false;
-    r = lookup(parent,name,if_exist,ino_out);
+    r = _lookup(parent,name,if_exist,ino_out);
     if(if_exist){
+        //release
+        lc->release(parent);
         r = EXIST;
         return r;
     }
-    if(r != OK) return r;
+    if(r != OK){
+        //release
+        lc->release(parent);
+        return r;
+    }
     ec->create(extent_protocol::T_FILE,ino_out);
     std::string origin_data;
     ec->get(parent,origin_data);
     std::ostringstream ost;
     ost << origin_data << std::string(name) << ":" << ino_out << ";";
     ec->put(parent,ost.str());
+    //release
+    lc->release(parent);
     return r;
 }
 
@@ -332,25 +297,43 @@ yfs_client::mkdir(inum parent, const char *name, mode_t mode, inum &ino_out)
         r = NOENT; // TODO:I don't know the meaning of NOENT....
         return r;
     }
+    //lock
+    lc->acquire(parent);
     bool if_exist = false;
-    r = lookup(parent,name,if_exist,ino_out);
+    r = _lookup(parent,name,if_exist,ino_out);
     if(if_exist){
+        //release
+        lc->release(parent);
         r = EXIST;
         return r;
     }
-    if(r != OK) return r;
+    if(r != OK){
+        //release
+        lc->release(parent);
+        return r;
+    }
     ec->create(extent_protocol::T_DIR,ino_out);
     std::string origin_data;
     ec->get(parent,origin_data);
     std::ostringstream ost;
     ost << origin_data << std::string(name) << ":" << ino_out << ";";
     ec->put(parent,ost.str());
+    //release
+    lc->release(parent);
     return r;
 }
 
 int
 yfs_client::lookup(inum parent, const char *name, bool &found, inum &ino_out)
 {
+    lc->acquire(parent);
+    int r = _lookup(parent,name,found,ino_out);
+    lc->release(parent);
+    return r;
+}
+
+int 
+yfs_client::_lookup(inum parent, const char *name, bool &found, inum &ino_out){
     int r = OK;
 
     /*
@@ -387,8 +370,8 @@ yfs_client::readdir(inum dir, std::list<dirent> &list)
      * note: you should parse the dirctory content using your defined format,
      * and push the dirents to the list.
      */
-    if(!isdir(dir)){
-        return EXIST;
+    if(!_isdir(dir)){
+        return ENOENT;
     }
     printf("\treaddir %d\n",dir);
     std::string dir_content;
@@ -424,14 +407,19 @@ yfs_client::read(inum ino, size_t size, off_t off, std::string &data)
      * your code goes here.
      * note: read using ec->get().
      */
+    //lock
+    lc->acquire(ino);
     printf("\tyfs_client::read(%d,%d,%d)",ino,size,off);
     std::string file_content;
     r = ec->get(ino,file_content);
     if(r != OK || file_content.size() < off){
+        lc->release(ino);
         return r;
     }else{
         data = file_content.substr(off,size);
     }
+    //release
+    lc->release(ino);
     return r;
 }
 
@@ -446,9 +434,13 @@ yfs_client::write(inum ino, size_t size, off_t off, const char *data,
      * note: write using ec->put().
      * when off > length of original file, fill the holes with '\0'.
      */
+    //lock
+    lc->acquire(ino);
+    printf("\tyfs-write:%d\n",ino);
     std::string origin_data;
     r = ec->get(ino,origin_data);
     if(r != OK){
+        lc->release(ino);
         bytes_written = 0;
         return r;
     }
@@ -466,11 +458,14 @@ yfs_client::write(inum ino, size_t size, off_t off, const char *data,
         bytes_written = new_data.size() + hole.size();//What's the meaning of byte_written?
     }
     r = ec->put(ino,final_data);
-    ec->get(ino,origin_data);
+    //ec->get(ino,origin_data);
     if(r != OK){
+        lc->release(ino);
         bytes_written = 0;
         return r;
     }
+    //release 
+    lc->release(ino);
     return r;
 }
 
@@ -484,8 +479,14 @@ int yfs_client::unlink(inum parent,const char *name)
      * and update the parent directory content.
      */
     std::list<dirent> dir_content;
+    //lock
+    lc->acquire(parent);
     r = readdir(parent,dir_content);
-    if(r != OK) return r;
+    if(r != OK){
+        //release
+        lc->release(parent);
+        return r;
+    }
     std::list<dirent>::iterator iter = dir_content.begin();
     unsigned long long inode_id;
     bool found = false;
@@ -501,15 +502,23 @@ int yfs_client::unlink(inum parent,const char *name)
     }
     if(!found){
         printf("File %s doesn't exist!",name);
+        //release
+        lc->release(parent);
         r = IOERR;
         return r;
     }
+    lc->acquire(inode_id);
     ec->remove(inode_id);
     std::ostringstream ost;
     for(iter = dir_content.begin(); iter!= dir_content.end(); iter++){
         ost << iter->name << ":" << iter->inum << ";";
     }
     r = ec->put(parent,ost.str());
+    //release
+    lc->release(inode_id);
+    lc->release(parent);
     return r;
 }
+
+
 

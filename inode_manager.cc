@@ -54,7 +54,6 @@ block_manager::alloc_block()
         }
         //Mark the offset and write back
         bitblock[j] |= (1<<offset);
-        printf("block offset：%d, j:%d,i:%d,bitblock:%x\n",offset,j,i,bitblock[j]);
         write_block(2,bitblock);
         return BPB*i + j*8 + offset;
       }
@@ -70,12 +69,12 @@ block_manager::free_block(uint32_t id)
    * your code goes here.
    * note: you should unmark the corresponding bit in the block bitmap when free.
    */
-  char block[BLOCK_SIZE];
-  read_block(BBLOCK(id),block);
+  char bitmap[BLOCK_SIZE];
+  read_block(BBLOCK(id),bitmap);
   int index = (id % BPB)/8;
   int offset = (id % BPB)%8;
-  block[index] &= ~((char)(1<<offset));
-  write_block(BBLOCK(id),block);
+  bitmap[index] &= ~((char)(1<<offset));
+  write_block(BBLOCK(id),bitmap);
   return;
 }
 
@@ -149,6 +148,7 @@ inode_manager::alloc_inode(uint32_t type)
   inode->mtime = time(&rawtime);
   inode->atime = time(&rawtime);
   put_inode(num,inode);
+  free(inode);
   return num;
 }
 
@@ -165,12 +165,10 @@ inode_manager::free_inode(uint32_t inum)
     printf("\tThis block has been freed.\n");
     return;
   }
-  struct inode* blank_inode = (struct inode*)malloc(sizeof(struct inode));
-  blank_inode->size = 0;
-  blank_inode->type = 0;
-  put_inode(inum,blank_inode);
+  old_inode->size = 0;
+  old_inode->type = 0;
+  put_inode(inum,old_inode);
   free(old_inode);
-  free(blank_inode);
   return;
 }
 
@@ -235,7 +233,10 @@ inode_manager::read_file(uint32_t inum, char **buf_out, int *size)
    */
   time_t rawtime;
   struct inode* inode = get_inode(inum);
-  if(inode == NULL) return;
+  if (inode == NULL) {
+    printf("\tread_file: inode not exist: %d\n", inum);
+    return;
+  }
   uint node_size = inode->size;
   if(node_size == 0) return;
   *size = node_size;
@@ -256,12 +257,11 @@ inode_manager::read_file(uint32_t inum, char **buf_out, int *size)
     bm->read_block(inode->blocks[NDIRECT],inblock);
     for(int i=0; i<(block_num - max_index); i++){
       blockid_t block_id = ((blockid_t*)inblock)[i];
-      char* inblock_data = (char*)malloc(BLOCK_SIZE);
+      //char* inblock_data = (char*)malloc(BLOCK_SIZE);
       bm->read_block(block_id,(block_data+(i+max_index)*BLOCK_SIZE));
     }
   }
   *buf_out = block_data;
-  printf("\tread result:%s,size = %d;\n",(block_data+8*BLOCK_SIZE),node_size);
   //Update inode metadata
   inode->atime = time(&rawtime);
   put_inode(inum, inode);
@@ -282,7 +282,10 @@ inode_manager::write_file(uint32_t inum, const char *buf, int size)
   printf("\tinode_manager-write_file:%d\n",size);
   time_t rawtime;
   struct inode* inode = get_inode(inum);
-  if(inode == NULL) return;
+  if(inode == NULL){
+    printf("\twrite_file: inode not exist: %d\n", inum);
+    return;
+  }
   uint old_num = inode->size%BLOCK_SIZE==0?(inode->size/BLOCK_SIZE):(inode->size/BLOCK_SIZE+1);
   uint new_num = size%BLOCK_SIZE==0?(size/BLOCK_SIZE):(size/BLOCK_SIZE+1);
   if(old_num > new_num){
@@ -292,10 +295,17 @@ inode_manager::write_file(uint32_t inum, const char *buf, int size)
         bm->write_block(inode->blocks[i],(buf+i*BLOCK_SIZE));
       }
       char inblock[BLOCK_SIZE];
-      bm->read_block(inode->blocks[NINDIRECT],inblock);
+      bm->read_block(inode->blocks[NDIRECT],inblock);
       for(i=0; i<(new_num-NDIRECT); i++){
         blockid_t block_id = ((blockid_t*)inblock)[i];
-        bm->write_block(block_id,(buf+(i+NDIRECT)*BLOCK_SIZE));
+        if(i == new_num-NDIRECT-1){
+          char padding[BLOCK_SIZE];
+          bzero(padding, BLOCK_SIZE);
+          memcpy(padding, buf + (i+NDIRECT) * BLOCK_SIZE, size - i * BLOCK_SIZE);
+          bm->write_block(block_id, padding);
+        }else{
+          bm->write_block(block_id,(buf+(i+NDIRECT)*BLOCK_SIZE));
+        }
       }
       for(; i<(old_num-NDIRECT); i++){
         blockid_t block_id = ((blockid_t*)inblock)[i];
@@ -303,20 +313,35 @@ inode_manager::write_file(uint32_t inum, const char *buf, int size)
       }
     }else if(old_num > NDIRECT && new_num <= NDIRECT){
       for(; i<new_num; i++){
-        bm->write_block(inode->blocks[i],(buf+i*BLOCK_SIZE));
+        if(i == new_num -1){
+          char padding[BLOCK_SIZE];
+          bzero(padding, BLOCK_SIZE);
+          memcpy(padding, buf + i * BLOCK_SIZE, size - i * BLOCK_SIZE);
+          bm->write_block(inode->blocks[i], padding);
+        }else{
+          bm->write_block(inode->blocks[i],(buf+i*BLOCK_SIZE));
+        }
       }
       for(; i<NDIRECT; i++){
         bm->free_block(inode->blocks[i]);
       }
       char inblock[BLOCK_SIZE];
-      bm->read_block(inode->blocks[NINDIRECT],inblock);
+      bm->read_block(inode->blocks[NDIRECT],inblock);
       for(i=0; i<(old_num-NDIRECT); i++){
         blockid_t block_id = ((blockid_t*)inblock)[i];
         bm->free_block(block_id);
       }
-    }else{// node_size/BLOCK_SIZE <= NDIRECT
+      bm->free_block(inode->blocks[NDIRECT]);
+    }else{// old_num <= NDIRECT
       for(; i<new_num; i++){
-        bm->write_block(inode->blocks[i],(buf+i*BLOCK_SIZE));
+        if(i == new_num -1){
+          char padding[BLOCK_SIZE];
+          bzero(padding, BLOCK_SIZE);
+          memcpy(padding, buf + i * BLOCK_SIZE, size - i * BLOCK_SIZE);
+          bm->write_block(inode->blocks[i], padding);
+        }else{
+          bm->write_block(inode->blocks[i],(buf+i*BLOCK_SIZE));
+        }
       }
       for(; i<old_num; i++){
         bm->free_block(inode->blocks[i]);
@@ -335,7 +360,14 @@ inode_manager::write_file(uint32_t inum, const char *buf, int size)
       }
       for(; i<new_num; i++){
         ((uint*)inblock)[i-NDIRECT] = bm->alloc_block();
-        bm->write_block(((uint*)inblock)[i-NDIRECT],(buf+i*BLOCK_SIZE));
+        if(i == new_num -1){
+          char padding[BLOCK_SIZE];
+          bzero(padding, BLOCK_SIZE);
+          memcpy(padding, buf + i * BLOCK_SIZE, size - i * BLOCK_SIZE);
+          bm->write_block(((uint*)inblock)[i-NDIRECT], padding);
+        }else{
+          bm->write_block(((uint*)inblock)[i-NDIRECT],(buf+i*BLOCK_SIZE));
+        }
       }
       bm->write_block(inode->blocks[NDIRECT],inblock);
     }else if(new_num > NDIRECT && old_num <= NDIRECT){
@@ -351,19 +383,32 @@ inode_manager::write_file(uint32_t inum, const char *buf, int size)
       bm->read_block(inode->blocks[NDIRECT],inblock);
       for(; i<new_num; i++){
         ((uint*)inblock)[i-NDIRECT] = bm->alloc_block();
-        bm->write_block(((uint*)inblock)[i-NDIRECT],(buf+i*BLOCK_SIZE));
+        if(i == new_num -1){
+          char padding[BLOCK_SIZE];
+          bzero(padding, BLOCK_SIZE);
+          memcpy(padding, buf + i * BLOCK_SIZE, size - i * BLOCK_SIZE);
+          bm->write_block(((uint*)inblock)[i-NDIRECT], padding);
+        }else{
+          bm->write_block(((uint*)inblock)[i-NDIRECT],(buf+i*BLOCK_SIZE));
+        }
       }
       bm->write_block(inode->blocks[NDIRECT],inblock);
-    }else{// size/BLOCK_SIZE < NDIRECT
+    }else{// new_num < NDIRECT
       for(; i<old_num; i++){
         bm->write_block(inode->blocks[i],(buf+i*BLOCK_SIZE));
       }
       for(; i<new_num; i++){
         inode->blocks[i] = bm->alloc_block();
-        bm->write_block(inode->blocks[i],(buf+i*BLOCK_SIZE));
-        char new_data[BLOCK_SIZE];
-        bm->read_block(inode->blocks[i],new_data);
-        printf("\tnew_data:%s\n",new_data);
+        if(i == new_num -1){
+          char padding[BLOCK_SIZE];
+          bzero(padding, BLOCK_SIZE);
+          memcpy(padding, buf + i * BLOCK_SIZE, size - i * BLOCK_SIZE);
+          bm->write_block(inode->blocks[i], padding);
+        }else{
+          bm->write_block(inode->blocks[i],(buf+i*BLOCK_SIZE));
+        }
+        // char new_data[BLOCK_SIZE];
+        // bm->read_block(inode->blocks[i],new_data);
       }
     }
   }else{ //node_size/BLOCK_SIZE == size/BLOCK_SIZE
@@ -375,11 +420,25 @@ inode_manager::write_file(uint32_t inum, const char *buf, int size)
       char inblock[BLOCK_SIZE];
       bm->read_block(inode->blocks[NDIRECT],inblock);
       for(; i<old_num; i++){
-        bm->write_block(((uint*)inblock)[i-NDIRECT],(buf+i*BLOCK_SIZE));
+        if(i == new_num -1){
+          char padding[BLOCK_SIZE];
+          bzero(padding, BLOCK_SIZE);
+          memcpy(padding, buf + i * BLOCK_SIZE, size - i * BLOCK_SIZE);
+          bm->write_block(((uint*)inblock)[i-NDIRECT], padding);
+        }else{
+          bm->write_block(((uint*)inblock)[i-NDIRECT],(buf+i*BLOCK_SIZE));
+        }
       }
     }else{
       for(; i<old_num; i++){
-        bm->write_block(inode->blocks[i],(buf+i*BLOCK_SIZE));
+        if(i == new_num -1){
+          char padding[BLOCK_SIZE];
+          bzero(padding, BLOCK_SIZE);
+          memcpy(padding, buf + i * BLOCK_SIZE, size - i * BLOCK_SIZE);
+          bm->write_block(inode->blocks[i], padding);
+        }else{
+          bm->write_block(inode->blocks[i],(buf+i*BLOCK_SIZE));
+        }
       }
     }
   }
