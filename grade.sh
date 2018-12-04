@@ -10,7 +10,7 @@ score=0
 mkdir yfs1 >/dev/null 2>&1
 mkdir yfs2 >/dev/null 2>&1
 
-./start.sh
+./start.sh 5
 
 test_if_has_mount(){
 	mount | grep -q "yfs_client"

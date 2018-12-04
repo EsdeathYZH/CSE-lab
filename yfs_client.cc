@@ -9,11 +9,12 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include "extent_protocol.h"
+#include "lock_client_cache.h"
 
 yfs_client::yfs_client(std::string extent_dst, std::string lock_dst)
 {
   ec = new extent_client(extent_dst); //TODO : shall we lock root directory here?
-  lc = new lock_client(lock_dst);
+  lc = new lock_client_cache(lock_dst);
   if (ec->put(1, "") != extent_protocol::OK)
       printf("error init root dir\n"); // XYB: init root dir
 }
