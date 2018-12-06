@@ -504,7 +504,21 @@ inode_manager::append_block(uint32_t inum, blockid_t &bid)
   /*
    * your code goes here.
    */
-
+  blockid_t new_block = bm->alloc_block();
+  bid = new_block;
+  struct inode* inode = get_inode(inum);
+  uint block_num = (inode->size + BLOCK_SIZE -1)/BLOCK_SIZE;
+  if(block_num >= NDIRECT){
+    char inblock[BLOCK_SIZE];
+    bm->read_block(inode->blocks[NDIRECT],inblock);
+    ((uint*)inblock)[block_num - NDIRECT] = new_block;
+    bm->write_block(inode->blocks[NDIRECT], inblock);
+  }else{
+    inode->blocks[block_num] = new_block;
+  }
+  inode->size += BLOCK_SIZE;
+  put_inode(inum, inode);
+  free(inode);
 }
 
 void
@@ -513,7 +527,22 @@ inode_manager::get_block_ids(uint32_t inum, std::list<blockid_t> &block_ids)
   /*
    * your code goes here.
    */
+  struct inode* inode = get_inode(inum);
+  uint block_num = (inode->size + BLOCK_SIZE -1)/BLOCK_SIZE;
 
+  int i;
+  for(i = 0; i < MIN(block_num, NDIRECT); i++){
+    block_ids.push_back(inode->blocks[i]);
+  }
+
+  if(block_num > NDIRECT){
+    char inblock[BLOCK_SIZE];
+    bm->read_block(inode->blocks[NDIRECT],inblock);
+    for(i = NDIRECT; i < block_num; i++){
+      block_ids.push_back(((uint*)inblock)[i-NDIRECT]);
+    }
+  }
+  free(inode);
 }
 
 void
@@ -522,7 +551,7 @@ inode_manager::read_block(blockid_t id, char buf[BLOCK_SIZE])
   /*
    * your code goes here.
    */
-
+  bm->read_block(id, buf);
 }
 
 void
@@ -531,7 +560,7 @@ inode_manager::write_block(blockid_t id, const char buf[BLOCK_SIZE])
   /*
    * your code goes here.
    */
-
+  bm->write_block(id, buf);
 }
 
 void
@@ -540,5 +569,11 @@ inode_manager::complete(uint32_t inum, uint32_t size)
   /*
    * your code goes here.
    */
-
+  struct inode* inode = get_inode(inum);
+  inode->size = size;
+  inode->mtime = time(NULL);
+  inode->atime = time(NULL);
+  inode->ctime = time(NULL);
+  put_inode(inum,inode);
+  free(inode);
 }

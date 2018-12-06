@@ -154,16 +154,13 @@ yfs_client::symlink(inum parent, const char *link, const char *name, inum& ino_o
 }
 
 int
-yfs_client::getfile(inum inum, fileinfo &fin)
-{
+yfs_client::_getfile(inum inum, fileinfo &fin){
     int r = OK;
-    //lock
-    lc->acquire(inum);
     printf("getfile %016llx\n", inum);
     extent_protocol::attr a;
     if (ec->getattr(inum, a) != extent_protocol::OK) {
         r = IOERR;
-        goto release;
+        return r;
     }
 
     fin.atime = a.atime;
@@ -171,10 +168,31 @@ yfs_client::getfile(inum inum, fileinfo &fin)
     fin.ctime = a.ctime;
     fin.size = a.size;
     printf("getfile %016llx -> sz %llu\n", inum, fin.size);
-
-release:
+    return r;
+}
+int
+yfs_client::getfile(inum inum, fileinfo &fin)
+{
+    int r = OK;
+    //lock
+    lc->acquire(inum);
+    r = _getfile(inum, fin);
     //release 
     lc->release(inum);
+    return r;
+}
+
+int yfs_client::_getdir(inum inum, dirinfo &din){
+    int r = OK;
+    printf("getdir %016llx\n", inum);
+    extent_protocol::attr a;
+    if (ec->getattr(inum, a) != extent_protocol::OK) {
+        r = IOERR;
+        return r;
+    }
+    din.atime = a.atime;
+    din.mtime = a.mtime;
+    din.ctime = a.ctime;
     return r;
 }
 
@@ -185,17 +203,7 @@ yfs_client::getdir(inum inum, dirinfo &din)
 
     //lock
     lc->acquire(inum);
-    printf("getdir %016llx\n", inum);
-    extent_protocol::attr a;
-    if (ec->getattr(inum, a) != extent_protocol::OK) {
-        r = IOERR;
-        goto release;
-    }
-    din.atime = a.atime;
-    din.mtime = a.mtime;
-    din.ctime = a.ctime;
-
-release:
+    r = _getdir(inum, din);
     //release
     lc->release(inum);
     return r;
@@ -238,6 +246,76 @@ yfs_client::setattr(inum ino, size_t size)
     ec->put(ino,data);
     //release
     lc->release(ino);
+    return r;
+}
+
+int yfs_client::acquire2dir(inum dir1, inum dir2){
+    int r = OK;
+    lc->acquire(dir1 > dir2 ? dir2 : dir1);
+    if(dir1 != dir2){
+        lc->acquire(dir1 > dir2 ? dir1 : dir2);
+    }
+    return r;
+}
+
+int yfs_client::release2dir(inum dir1, inum dir2){
+    int r = OK;
+    lc->release(dir1 > dir2 ? dir1 : dir2);
+    if(dir1 != dir2){
+        lc->release(dir1 > dir2 ? dir2 : dir1);
+    }
+    return r;
+}
+
+int 
+yfs_client::rename(inum src_dir, const char* src_name, inum dst_dir, const char* dst_name)
+{
+    int r = OK;
+    std::string dst_name_str(dst_name);
+    if(dst_name_str.find('/') != std::string::npos || dst_name_str.find('\0') != std::string::npos){
+        printf("Wrong file name:%s!",dst_name);
+        r = NOENT;
+        return r;
+    }
+
+    //lock
+    acquire2dir(src_dir, dst_dir);
+
+    //check src_file and dst_file
+    bool if_exist = false;
+    inum inode_num, check_num;
+    r = _lookup(src_dir, src_name, if_exist, inode_num);
+    if(!if_exist){//src file doesn't exist
+        //release
+        release2dir(src_dir, dst_dir);
+        r = IOERR;
+        return r;
+    }
+    r = _lookup(dst_dir, dst_name, if_exist, check_num);
+    if(if_exist){//dst file already exists
+        //release
+        release2dir(src_dir, dst_dir);
+        r = EXIST;
+        return r;
+    }
+
+    std::string origin_data;
+    ec->get(dst_dir,origin_data);
+    std::ostringstream dst_ost;
+    dst_ost << origin_data << dst_name_str << ":" << inode_num << ";";
+    ec->put(dst_dir,dst_ost.str());
+
+    std::list<dirent> dir_content;
+    r = _readdir(src_dir,dir_content);
+    std::ostringstream src_ost;
+    for(std::list<dirent>::iterator iter = dir_content.begin(); iter!= dir_content.end(); iter++){
+        if(!strcmp(iter->name.c_str(),src_name)){
+            src_ost << iter->name << ":" << iter->inum << ";";
+        }
+    }
+    r = ec->put(src_dir,src_ost.str());
+
+    release2dir(src_dir, dst_dir);
     return r;
 }
 
@@ -343,7 +421,7 @@ yfs_client::_lookup(inum parent, const char *name, bool &found, inum &ino_out){
      * you should design the format of directory content.   //directory content: ([filename]:[inode-number];)*
      */
     std::list<dirent> dirent_list;
-    r = readdir(parent,dirent_list);
+    r = _readdir(parent,dirent_list);
     if(r != OK){
         found = false;
         return r;
@@ -360,9 +438,18 @@ yfs_client::_lookup(inum parent, const char *name, bool &found, inum &ino_out){
     }
     return r;
 }
-
 int
 yfs_client::readdir(inum dir, std::list<dirent> &list)
+{
+    int r = OK;
+    lc->acquire(dir);
+    r = _readdir(dir, list);
+    lc->release(dir);
+    return r;
+}
+
+int
+yfs_client::_readdir(inum dir, std::list<dirent> &list)
 {
     int r = OK;
 
@@ -469,8 +556,18 @@ yfs_client::write(inum ino, size_t size, off_t off, const char *data,
     lc->release(ino);
     return r;
 }
-
 int yfs_client::unlink(inum parent,const char *name)
+{
+    int r = OK;
+    //acquire
+    lc->acquire(parent);
+    r = _unlink(parent, name);
+    //release
+    lc->release(parent);
+    return r;
+}
+
+int yfs_client::_unlink(inum parent,const char *name)
 {
     int r = OK;
 
@@ -480,12 +577,8 @@ int yfs_client::unlink(inum parent,const char *name)
      * and update the parent directory content.
      */
     std::list<dirent> dir_content;
-    //lock
-    lc->acquire(parent);
-    r = readdir(parent,dir_content);
+    r = _readdir(parent,dir_content);
     if(r != OK){
-        //release
-        lc->release(parent);
         return r;
     }
     std::list<dirent>::iterator iter = dir_content.begin();
@@ -503,8 +596,6 @@ int yfs_client::unlink(inum parent,const char *name)
     }
     if(!found){
         printf("File %s doesn't exist!",name);
-        //release
-        lc->release(parent);
         r = IOERR;
         return r;
     }
@@ -517,7 +608,6 @@ int yfs_client::unlink(inum parent,const char *name)
     r = ec->put(parent,ost.str());
     //release
     lc->release(inode_id);
-    lc->release(parent);
     return r;
 }
 

@@ -4,6 +4,7 @@
 #include <namenode.pb.h>
 #include <string>
 #include <list>
+#include "lock_client_cache.h"
 #include "yfs_client.h"
 #include <stdexcept>
 #include <set>
@@ -50,6 +51,9 @@ private:
   lock_client_cache *lc;
   yfs_client *yfs;
   DatanodeIDProto master_datanode;
+  std::list<DatanodeIDProto> slave_datanodes; 
+  std::list<blockid_t> data_blocks; 
+  std::map<std::string,bool> liveness_map;
   std::map<yfs_client::inum, uint32_t> pendingWrite;
 
   /* Add your member variables/functions here */

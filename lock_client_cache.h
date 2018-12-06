@@ -5,15 +5,11 @@
 #define lock_client_cache_h
 
 #include <string>
-#include <queue>
-#include <map>
 #include "lock_protocol.h"
 #include "rpc.h"
 #include "lock_client.h"
 #include "lang/verify.h"
 
-
-typedef long tid;
 
 // Classes that inherit lock_release_user can override dorelease so that 
 // that they will be called when lock_client releases a lock.
@@ -24,45 +20,36 @@ class lock_release_user {
   virtual ~lock_release_user() {};
 };
 
-class lock_client_cache : public lock_client {
-private:
-    class lock_release_user *lu;
-    int rlock_port;
-    std::string hostname;
-    std::string id;
-
-protected:
-    enum xxstate{
-        NONE, FREE, LOCKED, ACQUIRING, RELEASING, RETRY
-    };
-
-    struct lock_info{
-        xxstate state;
-        pthread_t owner;
-        bool is_revoked;
-        std::queue<tid> waiting_threads;
-        //pthread_cond_t lock_cv;
-
-        lock_info(){
-            state = NONE;
-            owner = 0;
-            is_revoked = false;
-        }
-    };
-
-    std::map<lock_protocol::lockid_t, lock_info> lockmap;
-    pthread_mutex_t mutex;
-    pthread_cond_t cv;
-
+class ClientLock{
 public:
+  int lock_status;
+  pthread_t hold_thread;
+  pthread_cond_t cond;
+  bool revoke_arrive;
+  bool retry_arrive;
+
+  ClientLock();
+};
+
+class lock_client_cache : public lock_client {
+ private:
+  class lock_release_user *lu;
+  int rlock_port;
+  std::string hostname;
+  std::string id;
+  std::map<lock_protocol::lockid_t, ClientLock>lock_cache;
+  pthread_mutex_t mutex;
+
+ public:
   static int last_port;
+  enum client_lock_status { NONE, FREE, LOCKED, ACQUIRING, RELEASING };
   lock_client_cache(std::string xdst, class lock_release_user *l = 0);
   virtual ~lock_client_cache() {};
   lock_protocol::status acquire(lock_protocol::lockid_t);
   lock_protocol::status release(lock_protocol::lockid_t);
   rlock_protocol::status revoke_handler(lock_protocol::lockid_t, 
                                         int &);
-  rlock_protocol::status retry_handler(lock_protocol::lockid_t, bool,
+  rlock_protocol::status retry_handler(lock_protocol::lockid_t, int revoke_flag,
                                        int &);
 };
 

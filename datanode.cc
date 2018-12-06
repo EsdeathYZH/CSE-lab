@@ -36,17 +36,41 @@ int DataNode::init(const string &extent_dst, const string &namenode, const struc
   }
 
   /* Add your initialization here */
-
+  //int interval = 2;
+  //NewThread(this, DataNode::keepSendHeartbeat, interval);
   return 0;
+}
+
+void DataNode::keepSendHeartbeat(int interval){
+  bool heartbeat_response = true;
+  while(heartbeat_response){
+    heartbeat_response = SendHeartbeat();
+    sleep(interval);
+  }
 }
 
 bool DataNode::ReadBlock(blockid_t bid, uint64_t offset, uint64_t len, string &buf) {
   /* Your lab4 part 2 code */
-  return false;
+  int r;
+  string block_content;
+  if((r = ec->read_block(bid, block_content)) < 0){
+    return false;
+  }
+  buf = block_content.substr(offset, len);
+  return true;
 }
 
 bool DataNode::WriteBlock(blockid_t bid, uint64_t offset, uint64_t len, const string &buf) {
   /* Your lab4 part 2 code */
+  int r;
+  string block_content;
+  if((r = ec->read_block(bid, block_content)) < 0){
+    return false;
+  }
+  block_content.replace(offset, len, buf);
+  if((r = ec->write_block(bid, block_content)) < 0){
+    return false;
+  }
   return false;
 }
 
