@@ -50,7 +50,7 @@ yfs_client::_isfile(inum inum)
     if (a.type == extent_protocol::T_FILE) {
         printf("\tisfile: %lld is a file\n", inum);
         return true;
-    } 
+    }
     printf("\tisfile: %lld isn't a file\n", inum);
     return false;
 }
@@ -58,9 +58,9 @@ yfs_client::_isfile(inum inum)
 bool
 yfs_client::isfile(inum inum)
 {
-    lc->acquire(inum);
+    //lc->acquire(inum);
     bool result = _isfile(inum);
-    lc->release(inum);
+    //lc->release(inum);
     return result;
 }
 
@@ -72,9 +72,9 @@ yfs_client::isfile(inum inum)
 
 bool 
 yfs_client::issymlink(inum inum){
-    lc->acquire(inum);
+    //lc->acquire(inum);
     bool result = _issymlink(inum);
-    lc->release(inum);
+    //lc->release(inum);
     return result;
 }
 
@@ -105,19 +105,19 @@ yfs_client::_isdir(inum inum)
 bool
 yfs_client::isdir(inum inum)
 {
-    lc->acquire(inum);
+    //lc->acquire(inum);
     bool result = _isdir(inum);
-    lc->release(inum);
+    //lc->release(inum);
     return result;
 }
 
 int 
 yfs_client::readlink(inum inum, std::string& buf)
 {
-    lc->acquire(inum);
+    //lc->acquire(inum);
     int r = OK;
     r = ec->get(inum,buf);
-    lc->release(inum);
+    //lc->release(inum);
     return r;
 }
 
@@ -175,10 +175,10 @@ yfs_client::getfile(inum inum, fileinfo &fin)
 {
     int r = OK;
     //lock
-    lc->acquire(inum);
+    //lc->acquire(inum);
     r = _getfile(inum, fin);
     //release 
-    lc->release(inum);
+    //lc->release(inum);
     return r;
 }
 
@@ -202,10 +202,10 @@ yfs_client::getdir(inum inum, dirinfo &din)
     int r = OK;
 
     //lock
-    lc->acquire(inum);
+    //lc->acquire(inum);
     r = _getdir(inum, din);
     //release
-    lc->release(inum);
+    //lc->release(inum);
     return r;
 }
 
@@ -309,11 +309,11 @@ yfs_client::rename(inum src_dir, const char* src_name, inum dst_dir, const char*
     r = _readdir(src_dir,dir_content);
     std::ostringstream src_ost;
     for(std::list<dirent>::iterator iter = dir_content.begin(); iter!= dir_content.end(); iter++){
-        if(!strcmp(iter->name.c_str(),src_name)){
+        if(strcmp(iter->name.c_str(),src_name)){
             src_ost << iter->name << ":" << iter->inum << ";";
         }
     }
-    r = ec->put(src_dir,src_ost.str());
+    ec->put(src_dir,src_ost.str());
 
     release2dir(src_dir, dst_dir);
     return r;
@@ -321,6 +321,18 @@ yfs_client::rename(inum src_dir, const char* src_name, inum dst_dir, const char*
 
 int
 yfs_client::create(inum parent, const char *name, mode_t mode, inum &ino_out)
+{
+    int r = OK;
+    //lock
+    //lc->acquire(parent);
+    r = _create(parent, name, mode, ino_out);
+    //release
+    //lc->release(parent);
+    return r;
+}
+
+int
+yfs_client::_create(inum parent, const char *name, mode_t mode, inum &ino_out)
 {
     int r = OK;
 
@@ -335,19 +347,11 @@ yfs_client::create(inum parent, const char *name, mode_t mode, inum &ino_out)
         r = NOENT; // TODO:I don't know the meaning of NOENT....
         return r;
     }
-    //lock
-    lc->acquire(parent);
     bool if_exist = false;
-    r = _lookup(parent,name,if_exist,ino_out);
+    inum check_inum;
+    r = _lookup(parent,name,if_exist,check_inum);
     if(if_exist){
-        //release
-        lc->release(parent);
         r = EXIST;
-        return r;
-    }
-    if(r != OK){
-        //release
-        lc->release(parent);
         return r;
     }
     ec->create(extent_protocol::T_FILE,ino_out);
@@ -356,8 +360,6 @@ yfs_client::create(inum parent, const char *name, mode_t mode, inum &ino_out)
     std::ostringstream ost;
     ost << origin_data << std::string(name) << ":" << ino_out << ";";
     ec->put(parent,ost.str());
-    //release
-    lc->release(parent);
     return r;
 }
 
@@ -377,18 +379,13 @@ yfs_client::mkdir(inum parent, const char *name, mode_t mode, inum &ino_out)
         return r;
     }
     //lock
-    lc->acquire(parent);
+    //lc->acquire(parent);
     bool if_exist = false;
     r = _lookup(parent,name,if_exist,ino_out);
     if(if_exist){
         //release
-        lc->release(parent);
+        //lc->release(parent);
         r = EXIST;
-        return r;
-    }
-    if(r != OK){
-        //release
-        lc->release(parent);
         return r;
     }
     ec->create(extent_protocol::T_DIR,ino_out);
@@ -398,23 +395,23 @@ yfs_client::mkdir(inum parent, const char *name, mode_t mode, inum &ino_out)
     ost << origin_data << std::string(name) << ":" << ino_out << ";";
     ec->put(parent,ost.str());
     //release
-    lc->release(parent);
+    //lc->release(parent);
     return r;
 }
 
 int
 yfs_client::lookup(inum parent, const char *name, bool &found, inum &ino_out)
 {
-    lc->acquire(parent);
+    //lc->acquire(parent);
     int r = _lookup(parent,name,found,ino_out);
-    lc->release(parent);
+    //lc->release(parent);
     return r;
 }
 
 int 
 yfs_client::_lookup(inum parent, const char *name, bool &found, inum &ino_out){
     int r = OK;
-
+    found = false;
     /*
      * your code goes here.
      * note: lookup file from parent dir according to name;
@@ -423,7 +420,7 @@ yfs_client::_lookup(inum parent, const char *name, bool &found, inum &ino_out){
     std::list<dirent> dirent_list;
     r = _readdir(parent,dirent_list);
     if(r != OK){
-        found = false;
+        printf("readdir failed!\n");
         return r;
     }
     std::list<dirent>::iterator iter = dirent_list.begin();
@@ -442,9 +439,9 @@ int
 yfs_client::readdir(inum dir, std::list<dirent> &list)
 {
     int r = OK;
-    lc->acquire(dir);
+    //lc->acquire(dir);
     r = _readdir(dir, list);
-    lc->release(dir);
+    //lc->release(dir);
     return r;
 }
 
@@ -459,7 +456,7 @@ yfs_client::_readdir(inum dir, std::list<dirent> &list)
      * and push the dirents to the list.
      */
     if(!_isdir(dir)){
-        return ENOENT;
+        return NOENT;
     }
     printf("\treaddir %d\n",dir);
     std::string dir_content;
@@ -496,7 +493,7 @@ yfs_client::read(inum ino, size_t size, off_t off, std::string &data)
      * note: read using ec->get().
      */
     //lock
-    lc->acquire(ino);
+    //lc->acquire(ino);
     printf("\tyfs_client::read(%d,%d,%d)",ino,size,off);
     std::string file_content;
     r = ec->get(ino,file_content);
@@ -507,7 +504,7 @@ yfs_client::read(inum ino, size_t size, off_t off, std::string &data)
         data = file_content.substr(off,size);
     }
     //release
-    lc->release(ino);
+    //lc->release(ino);
     return r;
 }
 
@@ -523,12 +520,12 @@ yfs_client::write(inum ino, size_t size, off_t off, const char *data,
      * when off > length of original file, fill the holes with '\0'.
      */
     //lock
-    lc->acquire(ino);
+    //lc->acquire(ino);
     printf("\tyfs-write:%d\n",ino);
     std::string origin_data;
     r = ec->get(ino,origin_data);
     if(r != OK){
-        lc->release(ino);
+        //lc->release(ino);
         bytes_written = 0;
         return r;
     }
@@ -548,22 +545,23 @@ yfs_client::write(inum ino, size_t size, off_t off, const char *data,
     r = ec->put(ino,final_data);
     //ec->get(ino,origin_data);
     if(r != OK){
-        lc->release(ino);
+        //lc->release(ino);
         bytes_written = 0;
         return r;
     }
     //release 
-    lc->release(ino);
+    //lc->release(ino);
     return r;
 }
+
 int yfs_client::unlink(inum parent,const char *name)
 {
     int r = OK;
     //acquire
-    lc->acquire(parent);
+    //lc->acquire(parent);
     r = _unlink(parent, name);
     //release
-    lc->release(parent);
+    //lc->release(parent);
     return r;
 }
 
@@ -599,7 +597,7 @@ int yfs_client::_unlink(inum parent,const char *name)
         r = IOERR;
         return r;
     }
-    lc->acquire(inode_id);
+    //lc->acquire(inode_id);
     ec->remove(inode_id);
     std::ostringstream ost;
     for(iter = dir_content.begin(); iter!= dir_content.end(); iter++){
@@ -607,7 +605,7 @@ int yfs_client::_unlink(inum parent,const char *name)
     }
     r = ec->put(parent,ost.str());
     //release
-    lc->release(inode_id);
+    //lc->release(inode_id);
     return r;
 }
 

@@ -51,9 +51,12 @@ private:
   lock_client_cache *lc;
   yfs_client *yfs;
   DatanodeIDProto master_datanode;
-  std::list<DatanodeIDProto> slave_datanodes; 
-  std::list<blockid_t> data_blocks; 
+  std::set<DatanodeIDProto> slave_datanodes; 
+  std::set<blockid_t> data_blocks; 
   std::map<std::string,bool> liveness_map;
+  std::map<std::string,bool> replica_ok_map;
+  std::map<std::string,std::set<blockid_t>> replicablocks_map;
+  std::map<std::string,time_t> heartbeattime_map;
   std::map<yfs_client::inum, uint32_t> pendingWrite;
 
   /* Add your member variables/functions here */
@@ -84,6 +87,7 @@ private:
   void DatanodeHeartbeat(DatanodeIDProto id);
   std::list<DatanodeIDProto> GetDatanodes();
   static bool ReplicateBlock(blockid_t bid, DatanodeIDProto from, DatanodeIDProto to);
+  void CheckLiveness(int check_interval);
 public:
   void init(const std::string &extent_dst, const std::string &lock_dst);
   bool PBGetFileInfoFromInum(yfs_client::inum ino, HdfsFileStatusProto &info);

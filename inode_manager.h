@@ -7,7 +7,7 @@
 #include "extent_protocol.h" // TODO: delete it
 
 #define DISK_SIZE  1024*1024*32
-#define BLOCK_SIZE (1024*16)
+#define BLOCK_SIZE 512
 #define BLOCK_NUM  (DISK_SIZE/BLOCK_SIZE)
 
 // disk layer -----------------------------------------
@@ -53,7 +53,7 @@ class block_manager {
 //(BLOCK_SIZE / sizeof(struct inode))
 
 // Block containing inode i
-#define IBLOCK(i, nblocks)     ((nblocks)/BPB + (i)/IPB + 1)            //modified
+#define IBLOCK(i, nblocks)     ((nblocks)/BPB + (i)/IPB + 2)            //modified
 
 // Bitmap bits per block
 #define BPB           (BLOCK_SIZE*8)

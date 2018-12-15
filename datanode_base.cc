@@ -162,6 +162,7 @@ bool DataNode::SendHeartbeat() {
 
 static bool ReadOp(CodedInputStream &is, int &op) {
   uint8_t buf[3];
+  fprintf(stderr, "op:%d\n", op); fflush(stderr);
   if (!is.ReadRaw(buf, sizeof(buf))) {
     fprintf(stderr, "%s:%d read op failed\n", __func__, __LINE__); fflush(stderr);
     return false;
@@ -530,8 +531,10 @@ void *worker(void *_arg) {
 
   while (!stop) {
     int op;
-    if (!ReadOp(cis, op))
+    if (!ReadOp(cis, op)){
+      printf("failed op:%d\n", op);fflush(stdout);
       break;
+    }
 
     switch (op) {
     case 81: // Read block

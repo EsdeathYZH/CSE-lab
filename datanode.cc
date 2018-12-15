@@ -36,14 +36,18 @@ int DataNode::init(const string &extent_dst, const string &namenode, const struc
   }
 
   /* Add your initialization here */
-  //int interval = 2;
-  //NewThread(this, DataNode::keepSendHeartbeat, interval);
+  int interval = 1;
+  NewThread(this, &DataNode::keepSendHeartbeat, interval);
+  
+  if (ec->put(1, "") != extent_protocol::OK)
+      printf("error init root dir\n"); // XYB: init root dir
   return 0;
 }
 
 void DataNode::keepSendHeartbeat(int interval){
   bool heartbeat_response = true;
   while(heartbeat_response){
+    printf("send a heartbeat..\n");fflush(stdout);
     heartbeat_response = SendHeartbeat();
     sleep(interval);
   }
@@ -51,9 +55,15 @@ void DataNode::keepSendHeartbeat(int interval){
 
 bool DataNode::ReadBlock(blockid_t bid, uint64_t offset, uint64_t len, string &buf) {
   /* Your lab4 part 2 code */
+  printf("read_block start!\n");fflush(stdout);
+  if(offset >= BLOCK_SIZE){
+    printf("offset invalid!\n");fflush(stdout);
+    return true;
+  }
   int r;
   string block_content;
-  if((r = ec->read_block(bid, block_content)) < 0){
+  if((r = ec->read_block(bid, block_content)) != extent_protocol::OK){
+    printf("read_block(in read) failed!\n");fflush(stdout);
     return false;
   }
   buf = block_content.substr(offset, len);
@@ -62,15 +72,24 @@ bool DataNode::ReadBlock(blockid_t bid, uint64_t offset, uint64_t len, string &b
 
 bool DataNode::WriteBlock(blockid_t bid, uint64_t offset, uint64_t len, const string &buf) {
   /* Your lab4 part 2 code */
+  printf("writeblock start!\n");fflush(stdout);
   int r;
   string block_content;
-  if((r = ec->read_block(bid, block_content)) < 0){
+  if((r = ec->read_block(bid, block_content)) != extent_protocol::OK){
+    printf("read_block(in write) failed!\n");
+    fflush(stdout);
     return false;
   }
-  block_content.replace(offset, len, buf);
-  if((r = ec->write_block(bid, block_content)) < 0){
+  if(offset >= BLOCK_SIZE){
+    printf("offset invalid(in write)!\n");fflush(stdout);
+    return true;
+  }
+  block_content = block_content.replace(offset, len, buf);
+  if((r = ec->write_block(bid, block_content)) != extent_protocol::OK){
+    printf("writeblock failed!\n");
+    fflush(stdout);
     return false;
   }
-  return false;
+  return true;
 }
 

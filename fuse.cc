@@ -531,6 +531,8 @@ main(int argc, char *argv[])
 
     myid = random();
 
+
+    //yfs = new yfs_client(new extent_client(argv[2]), new lock_client(argv[3]));
     yfs = new yfs_client(argv[2], argv[3]);
     // yfs = new yfs_client();
 

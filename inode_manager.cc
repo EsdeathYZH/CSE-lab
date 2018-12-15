@@ -54,7 +54,7 @@ block_manager::alloc_block()
         }
         //Mark the offset and write back
         bitblock[j] |= (1<<offset);
-        write_block(2,bitblock);
+        write_block(i+2,bitblock);
         return BPB*i + j*8 + offset;
       }
     }
@@ -129,7 +129,7 @@ inode_manager::alloc_inode(uint32_t type)
   struct inode* inode;
   uint32_t num = 1;
   //Find free inode number
-  for(; num<INODE_NUM; num++){
+  for(; num <= INODE_NUM; num++){
     inode = get_inode(num);
     if(inode == NULL){
       break;
@@ -137,7 +137,7 @@ inode_manager::alloc_inode(uint32_t type)
     free(inode);
   }
   //If there is no residual inode.
-  if(num == INODE_NUM){
+  if(num > INODE_NUM){
     printf("\tim: error! There is no inode left!\n");
     exit(0);
   }
@@ -164,6 +164,9 @@ inode_manager::free_inode(uint32_t inum)
   if(old_inode == NULL){
     printf("\tThis block has been freed.\n");
     return;
+  }
+  if(inum == 1){
+    printf("\troot dir is freed!!!\n");
   }
   old_inode->size = 0;
   old_inode->type = 0;
@@ -195,6 +198,9 @@ inode_manager::get_inode(uint32_t inum)
   if (ino_disk->type == 0) {
     printf("\tim: inode not exist\n");
     return NULL;
+  }
+  if(inum == 1 && ino_disk->type == 2){
+    printf("\tim: root dir is a file???\n");
   }
 
   ino = (struct inode*)malloc(sizeof(struct inode));
@@ -240,7 +246,7 @@ inode_manager::read_file(uint32_t inum, char **buf_out, int *size)
   uint node_size = inode->size;
   if(node_size == 0) return;
   *size = node_size;
-  uint block_num = node_size%BLOCK_SIZE==0?(node_size/BLOCK_SIZE):(node_size/BLOCK_SIZE+1);
+  uint block_num = (node_size+BLOCK_SIZE-1)/BLOCK_SIZE;
   //buf_out = (char**)malloc(block_num);
   uint max_index = MIN(NDIRECT,block_num); 
 
@@ -276,7 +282,7 @@ inode_manager::write_file(uint32_t inum, const char *buf, int size)
   /*
    * your code goes here.
    * note: write buf to blocks of inode inum.
-   * you need to consider the situation when the size of buf 
+   * you need to consider the situation when the size of buf
    * is larger or smaller than the size of original inode
    */
   printf("\tinode_manager-write_file:%d\n",size);
@@ -286,12 +292,12 @@ inode_manager::write_file(uint32_t inum, const char *buf, int size)
     printf("\twrite_file: inode not exist: %d\n", inum);
     return;
   }
-  uint old_num = inode->size%BLOCK_SIZE==0?(inode->size/BLOCK_SIZE):(inode->size/BLOCK_SIZE+1);
-  uint new_num = size%BLOCK_SIZE==0?(size/BLOCK_SIZE):(size/BLOCK_SIZE+1);
+  uint old_num = (inode->size+BLOCK_SIZE-1) / BLOCK_SIZE;
+  uint new_num = (size+BLOCK_SIZE-1) / BLOCK_SIZE;
   if(old_num > new_num){
-    int i=0;
+    int i = 0;
     if(old_num > NDIRECT && new_num > NDIRECT){
-      for(; i<NDIRECT; i++){
+      for(; i < NDIRECT; i++){
         bm->write_block(inode->blocks[i],(buf+i*BLOCK_SIZE));
       }
       char inblock[BLOCK_SIZE];
@@ -301,10 +307,10 @@ inode_manager::write_file(uint32_t inum, const char *buf, int size)
         if(i == new_num-NDIRECT-1){
           char padding[BLOCK_SIZE];
           bzero(padding, BLOCK_SIZE);
-          memcpy(padding, buf + (i+NDIRECT) * BLOCK_SIZE, size - i * BLOCK_SIZE);
+          memcpy(padding, buf + (i+NDIRECT) * BLOCK_SIZE, size - (i+NDIRECT) * BLOCK_SIZE);
           bm->write_block(block_id, padding);
         }else{
-          bm->write_block(block_id,(buf+(i+NDIRECT)*BLOCK_SIZE));
+          bm->write_block(block_id, (buf+(i+NDIRECT)*BLOCK_SIZE));
         }
       }
       for(; i<(old_num-NDIRECT); i++){
@@ -312,7 +318,7 @@ inode_manager::write_file(uint32_t inum, const char *buf, int size)
         bm->free_block(block_id);
       }
     }else if(old_num > NDIRECT && new_num <= NDIRECT){
-      for(; i<new_num; i++){
+      for(; i < new_num; i++){
         if(i == new_num -1){
           char padding[BLOCK_SIZE];
           bzero(padding, BLOCK_SIZE);
@@ -356,17 +362,17 @@ inode_manager::write_file(uint32_t inum, const char *buf, int size)
       char inblock[BLOCK_SIZE];
       bm->read_block(inode->blocks[NDIRECT],inblock);
       for(; i<old_num; i++){
-        bm->write_block(((uint*)inblock)[i-NDIRECT],(buf+i*BLOCK_SIZE));
+        bm->write_block(((blockid_t*)inblock)[i-NDIRECT],(buf+i*BLOCK_SIZE));
       }
       for(; i<new_num; i++){
-        ((uint*)inblock)[i-NDIRECT] = bm->alloc_block();
+        ((blockid_t*)inblock)[i-NDIRECT] = bm->alloc_block();
         if(i == new_num -1){
           char padding[BLOCK_SIZE];
           bzero(padding, BLOCK_SIZE);
           memcpy(padding, buf + i * BLOCK_SIZE, size - i * BLOCK_SIZE);
-          bm->write_block(((uint*)inblock)[i-NDIRECT], padding);
+          bm->write_block(((blockid_t*)inblock)[i-NDIRECT], padding);
         }else{
-          bm->write_block(((uint*)inblock)[i-NDIRECT],(buf+i*BLOCK_SIZE));
+          bm->write_block(((blockid_t*)inblock)[i-NDIRECT],(buf+i*BLOCK_SIZE));
         }
       }
       bm->write_block(inode->blocks[NDIRECT],inblock);
@@ -382,14 +388,14 @@ inode_manager::write_file(uint32_t inum, const char *buf, int size)
       char inblock[BLOCK_SIZE];
       bm->read_block(inode->blocks[NDIRECT],inblock);
       for(; i<new_num; i++){
-        ((uint*)inblock)[i-NDIRECT] = bm->alloc_block();
+        ((blockid_t*)inblock)[i-NDIRECT] = bm->alloc_block();
         if(i == new_num -1){
           char padding[BLOCK_SIZE];
           bzero(padding, BLOCK_SIZE);
           memcpy(padding, buf + i * BLOCK_SIZE, size - i * BLOCK_SIZE);
-          bm->write_block(((uint*)inblock)[i-NDIRECT], padding);
+          bm->write_block(((blockid_t*)inblock)[i-NDIRECT], padding);
         }else{
-          bm->write_block(((uint*)inblock)[i-NDIRECT],(buf+i*BLOCK_SIZE));
+          bm->write_block(((blockid_t*)inblock)[i-NDIRECT],(buf+i*BLOCK_SIZE));
         }
       }
       bm->write_block(inode->blocks[NDIRECT],inblock);
@@ -506,10 +512,22 @@ inode_manager::append_block(uint32_t inum, blockid_t &bid)
    */
   blockid_t new_block = bm->alloc_block();
   bid = new_block;
+  //clear new block
+  //char zero_block[BLOCK_SIZE];
+  //memset(zero_block, 0, BLOCK_SIZE);
+  //write_block(new_block, zero_block);
+
   struct inode* inode = get_inode(inum);
   uint block_num = (inode->size + BLOCK_SIZE -1)/BLOCK_SIZE;
-  if(block_num >= NDIRECT){
+  if(block_num > NDIRECT){
     char inblock[BLOCK_SIZE];
+    bm->read_block(inode->blocks[NDIRECT],inblock);
+    ((uint*)inblock)[block_num - NDIRECT] = new_block;
+    bm->write_block(inode->blocks[NDIRECT], inblock);
+  }else if(block_num == NDIRECT){
+    char inblock[BLOCK_SIZE];
+    blockid_t indirect_block = bm->alloc_block();
+    inode->blocks[NDIRECT] = indirect_block;
     bm->read_block(inode->blocks[NDIRECT],inblock);
     ((uint*)inblock)[block_num - NDIRECT] = new_block;
     bm->write_block(inode->blocks[NDIRECT], inblock);
